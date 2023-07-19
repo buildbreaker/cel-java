@@ -19,6 +19,8 @@ import static org.projectnessie.cel.CEL.estimateCost;
 import static org.projectnessie.cel.Prog.emptyEvalState;
 import static org.projectnessie.cel.interpreter.EvalState.newEvalState;
 
+import io.perfmark.PerfMark;
+import io.perfmark.TaskCloseable;
 import org.projectnessie.cel.interpreter.Coster;
 import org.projectnessie.cel.interpreter.EvalState;
 
@@ -32,18 +34,20 @@ final class ProgGen implements Program, Coster {
   /** Eval implements the Program interface method. */
   @Override
   public EvalResult eval(Object input) {
-    // The factory based Eval() differs from the standard evaluation model in that it generates a
-    // new EvalState instance for each call to ensure that unique evaluations yield unique stateful
-    // results.
-    EvalState state = newEvalState();
+    try (TaskCloseable _x = PerfMark.traceTask("cel_eval_prog_gen")) {
+      // The factory based Eval() differs from the standard evaluation model in that it generates a
+      // new EvalState instance for each call to ensure that unique evaluations yield unique stateful
+      // results.
+      EvalState state = newEvalState();
 
-    // Generate a new instance of the interpretable using the factory configured during the call to
-    // newProgram(). It is incredibly unlikely that the factory call will generate an error given
-    // the factory test performed within the Program() call.
-    Program p = factory.apply(state);
+      // Generate a new instance of the interpretable using the factory configured during the call to
+      // newProgram(). It is incredibly unlikely that the factory call will generate an error given
+      // the factory test performed within the Program() call.
+      Program p = factory.apply(state);
 
-    // Evaluate the input, returning the result and the 'state' within EvalDetails.
-    return p.eval(input);
+      // Evaluate the input, returning the result and the 'state' within EvalDetails.
+      return p.eval(input);
+    }
   }
 
   /** Cost implements the Coster interface method. */

@@ -25,6 +25,9 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+
+import io.perfmark.PerfMark;
+import io.perfmark.TaskCloseable;
 import org.projectnessie.cel.common.types.Err.ErrException;
 import org.projectnessie.cel.common.types.ref.Val;
 import org.projectnessie.cel.interpreter.Activation;
@@ -74,35 +77,37 @@ final class Prog implements Program, Coster {
   /** Eval implements the Program interface method. */
   @Override
   public EvalResult eval(Object input) {
-    Val v;
+    try (TaskCloseable _x = PerfMark.traceTask("cel_eval")) {
+      Val v;
 
-    EvalDetails evalDetails = new EvalDetails(state);
+      EvalDetails evalDetails = new EvalDetails(state);
 
-    try {
-      // Build a hierarchical activation if there are default vars set.
-      Activation vars = newActivation(input);
+      try (TaskCloseable _inner = PerfMark.traceTask("interpretable_eval")){
+        // Build a hierarchical activation if there are default vars set.
+        Activation vars = newActivation(input);
 
-      if (defaultVars != null) {
-        vars = newHierarchicalActivation(defaultVars, vars);
+        if (defaultVars != null) {
+          vars = newHierarchicalActivation(defaultVars, vars);
+        }
+
+        v = interpretable.eval(vars);
+      } catch (ErrException e) {
+        v = e.getErr();
+      } catch (Exception e) {
+        throw new RuntimeException(String.format("internal error: %s", e.getMessage()), e);
       }
 
-      v = interpretable.eval(vars);
-    } catch (ErrException e) {
-      v = e.getErr();
-    } catch (Exception e) {
-      throw new RuntimeException(String.format("internal error: %s", e.getMessage()), e);
+      // The output of an internal Eval may have a value (`v`) that is a types.Err. This step
+      // translates the CEL value to a Go error response. This interface does not quite match the
+      // RPC signature which allows for multiple errors to be returned, but should be sufficient.
+      // NOTE: Unlike the Go implementation, errors are handled differently in the Java
+      // implementation.
+      //    if (isError(v)) {
+      //      throw new EvalException(v);
+      //    }
+
+      return newEvalResult(v, evalDetails);
     }
-
-    // The output of an internal Eval may have a value (`v`) that is a types.Err. This step
-    // translates the CEL value to a Go error response. This interface does not quite match the
-    // RPC signature which allows for multiple errors to be returned, but should be sufficient.
-    // NOTE: Unlike the Go implementation, errors are handled differently in the Java
-    // implementation.
-    //    if (isError(v)) {
-    //      throw new EvalException(v);
-    //    }
-
-    return newEvalResult(v, evalDetails);
   }
 
   // Cost implements the Coster interface method.

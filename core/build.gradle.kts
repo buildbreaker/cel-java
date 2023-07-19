@@ -31,6 +31,9 @@ dependencies {
   api(project(":cel-generated-pb"))
 
   implementation(libs.agrona)
+  implementation("io.perfmark:perfmark-api:0.26.0")
+  // Only needed for applications, not libraries.
+  implementation("io.perfmark:perfmark-traceviewer:0.26.0")
 
   testImplementation(project(":cel-generated-pb", "testJar"))
   testImplementation(project(":cel-tools"))

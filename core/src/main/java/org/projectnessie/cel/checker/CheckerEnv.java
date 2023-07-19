@@ -35,6 +35,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+
+import io.perfmark.PerfMark;
+import io.perfmark.TaskCloseable;
 import org.projectnessie.cel.common.containers.Container;
 import org.projectnessie.cel.common.types.ref.TypeProvider;
 import org.projectnessie.cel.common.types.ref.Val;
@@ -97,19 +100,25 @@ public final class CheckerEnv {
 
   /** Add adds new Decl protos to the Env. Returns an error for identifier redeclarations. */
   public void add(List<Decl> decls) {
-    List<String> errMsgs = new ArrayList<>();
-    for (Decl decl : decls) {
-      switch (decl.getDeclKindCase()) {
-        case IDENT:
-          addIdent(sanitizeIdent(decl), errMsgs);
-          break;
-        case FUNCTION:
-          addFunction(sanitizeFunction(decl), errMsgs);
-          break;
+    try (TaskCloseable add = PerfMark.traceTask("add")) {
+      List<String> errMsgs = new ArrayList<>();
+      for (Decl decl : decls) {
+        switch (decl.getDeclKindCase()) {
+          case IDENT:
+            try (TaskCloseable parse_check = PerfMark.traceTask("add_indent")) {
+              addIdent(sanitizeIdent(decl), errMsgs);
+            }
+            break;
+          case FUNCTION:
+            try (TaskCloseable parse_check = PerfMark.traceTask("add_function")) {
+              addFunction(sanitizeFunction(decl), errMsgs);
+            }
+            break;
+        }
       }
-    }
-    if (!errMsgs.isEmpty()) {
-      throw new IllegalArgumentException(String.join("\n", errMsgs));
+      if (!errMsgs.isEmpty()) {
+        throw new IllegalArgumentException(String.join("\n", errMsgs));
+      }
     }
   }
 

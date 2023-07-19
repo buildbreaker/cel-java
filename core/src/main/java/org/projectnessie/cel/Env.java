@@ -183,48 +183,51 @@ public final class Env {
     // Note, errors aren't currently possible on the Ast to ParsedExpr conversion.
     ParsedExpr pe = astToParsedExpr(ast);
 
-    // Construct the internal checker env, erroring if there is an issue adding the declarations.
-    synchronized (once) {
-      if (chk == null && chkErr == null) {
-        CheckerEnv ce = CheckerEnv.newCheckerEnv(container, provider);
-        ce.enableDynamicAggregateLiterals(true);
-        if (hasFeature(FeatureDisableDynamicAggregateLiterals)) {
-          ce.enableDynamicAggregateLiterals(false);
-        }
-        try {
-          ce.add(declarations);
-          chk = ce;
-        } catch (RuntimeException e) {
-          chkErr = e;
-        } catch (Exception e) {
-          chkErr = new RuntimeException(e);
+    try (TaskCloseable parse_check = PerfMark.traceTask("check_sync_1")) {
+      // Construct the internal checker env, erroring if there is an issue adding the declarations.
+      synchronized (once) {
+        if (chk == null && chkErr == null) {
+          CheckerEnv ce = CheckerEnv.newCheckerEnv(container, provider);
+          ce.enableDynamicAggregateLiterals(true);
+          if (hasFeature(FeatureDisableDynamicAggregateLiterals)) {
+            ce.enableDynamicAggregateLiterals(false);
+          }
+          try (TaskCloseable a = PerfMark.traceTask("add_declarations")) {
+            ce.add(declarations);
+            chk = ce;
+          } catch (RuntimeException e) {
+            chkErr = e;
+          } catch (Exception e) {
+            chkErr = new RuntimeException(e);
+          }
         }
       }
     }
+    try (TaskCloseable parse_check = PerfMark.traceTask("check_afterwards")) {
+      // The once call will ensure that this value is set or nil for all invocations.
+      if (chkErr != null) {
+        Errors errs = new Errors(ast.getSource());
+        errs.reportError(chkErr, NoLocation, "%s", chkErr.toString());
+        return new AstIssuesTuple(null, newIssues(errs));
+      }
 
-    // The once call will ensure that this value is set or nil for all invocations.
-    if (chkErr != null) {
-      Errors errs = new Errors(ast.getSource());
-      errs.reportError(chkErr, NoLocation, "%s", chkErr.toString());
-      return new AstIssuesTuple(null, newIssues(errs));
+      ParseResult pr = new ParseResult(pe.getExpr(), new Errors(ast.getSource()), pe.getSourceInfo());
+      CheckResult checkRes = Checker.Check(pr, ast.getSource(), chk);
+      if (checkRes.hasErrors()) {
+        return new AstIssuesTuple(null, newIssues(checkRes.getErrors()));
+      }
+      // Manually create the Ast to ensure that the Ast source information (which may be more
+      // detailed than the information provided by Check), is returned to the caller.
+      CheckedExpr ce = checkRes.getCheckedExpr();
+      ast =
+              new Ast(
+                      ce.getExpr(),
+                      ce.getSourceInfo(),
+                      ast.getSource(),
+                      ce.getReferenceMapMap(),
+                      ce.getTypeMapMap());
+      return new AstIssuesTuple(ast, Issues.noIssues(ast.getSource()));
     }
-
-    ParseResult pr = new ParseResult(pe.getExpr(), new Errors(ast.getSource()), pe.getSourceInfo());
-    CheckResult checkRes = Checker.Check(pr, ast.getSource(), chk);
-    if (checkRes.hasErrors()) {
-      return new AstIssuesTuple(null, newIssues(checkRes.getErrors()));
-    }
-    // Manually create the Ast to ensure that the Ast source information (which may be more
-    // detailed than the information provided by Check), is returned to the caller.
-    CheckedExpr ce = checkRes.getCheckedExpr();
-    ast =
-        new Ast(
-            ce.getExpr(),
-            ce.getSourceInfo(),
-            ast.getSource(),
-            ce.getReferenceMapMap(),
-            ce.getTypeMapMap());
-    return new AstIssuesTuple(ast, Issues.noIssues(ast.getSource()));
   }
 
   /**

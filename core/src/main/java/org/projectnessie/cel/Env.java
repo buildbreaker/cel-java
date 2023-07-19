@@ -44,6 +44,9 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+
+import io.perfmark.PerfMark;
+import io.perfmark.TaskCloseable;
 import org.projectnessie.cel.EnvOption.EnvFeature;
 import org.projectnessie.cel.checker.Checker;
 import org.projectnessie.cel.checker.Checker.CheckResult;
@@ -424,20 +427,26 @@ public final class Env {
    * Ast format and then Program again.
    */
   public Ast residualAst(Ast a, EvalDetails details) {
-    Expr pruned = pruneAst(a.getExpr(), details.getState());
-    String expr = astToString(parsedExprToAst(ParsedExpr.newBuilder().setExpr(pruned).build()));
-    AstIssuesTuple parsedIss = parse(expr);
-    if (parsedIss.hasIssues()) {
-      throw parsedIss.getIssues().err();
+    try (TaskCloseable _inner = PerfMark.traceTask("residual_ast")) {
+      Expr pruned = pruneAst(a.getExpr(), details.getState());
+      String expr = astToString(parsedExprToAst(ParsedExpr.newBuilder().setExpr(pruned).build()));
+      try (TaskCloseable parse_check = PerfMark.traceTask("parse_check")) {
+        AstIssuesTuple parsedIss = parse(expr);
+        if (parsedIss.hasIssues()) {
+          throw parsedIss.getIssues().err();
+        }
+        if (!a.isChecked()) {
+          return parsedIss.ast;
+        }
+        try (TaskCloseable check = PerfMark.traceTask("check")) {
+          AstIssuesTuple checkedIss = check(parsedIss.ast);
+          if (checkedIss.hasIssues()) {
+            throw checkedIss.getIssues().err();
+          }
+          return checkedIss.ast;
+        }
+      }
     }
-    if (!a.isChecked()) {
-      return parsedIss.ast;
-    }
-    AstIssuesTuple checkedIss = check(parsedIss.ast);
-    if (checkedIss.hasIssues()) {
-      throw checkedIss.getIssues().err();
-    }
-    return checkedIss.ast;
   }
 
   /** configure applies a series of EnvOptions to the current environment. */
